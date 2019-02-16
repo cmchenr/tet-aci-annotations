@@ -12,9 +12,27 @@ IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 or implied.
 """
 
+"""
+Advanced Annotations for Cisco ACI and Tetration:
+Implements a "secondary IP" processing for any MAC's that provide more than one
+IP.
+
+Requires modified acitoolkit.py that checks all Endoint "Children" for "address"
+attributes to allow annotating multiple IP's belonging to a single endpoint.
+
+For significantly larger fabrics, paging needs to be implemented in the
+acitoolkit.py Endpoint gathering.
+"""
+
 __author__ = "Chris McHenry"
+__contributor__ = "Edward Carter"
 __copyright__ = "Copyright (c) 2019 Cisco and/or its affiliates."
 __license__ = "Cisco Sample Code License, Version 1.0"
+
+#TODO
+
+#Look into acisession.py error "Response too big" - need to include paging processing into data retreival.
+
 
 import os
 import re
@@ -28,6 +46,7 @@ from time import sleep, time
 import tempfile
 import argparse
 import getpass
+import json
 
 import requests
 from pylru import lrudecorator
@@ -200,6 +219,7 @@ class Track(StoppableThread):
                     app_profile = epg.get_parent()
                     tenant = app_profile.get_parent()
                     bd, vrf = get_ctx_and_bd(session, tenant, app_profile, epg)
+                    int_name = "Unknown"
                     if ep.if_dn:
                         for dn in ep.if_dn:
                             match = re.match('protpaths-(\d+)-(\d+)',
@@ -231,6 +251,26 @@ class Track(StoppableThread):
                         self.lock.release()
                     except ValueError:
                         continue
+                    for item in ep.secondary_ip:
+                        try:
+                            data = {
+                                "ip": item,
+                                "mac": ep.mac,
+                                "bd": bd,
+                                "vrf": vrf,
+                                "tenant": tenant.name,
+                                "app": app_profile.name,
+                                "epg": epg.name,
+                                "intf": int_name,
+                                "ts": ep.timestamp,
+                                "epg_dn": "uni/tn-{}/ap-{}/epg-{}".format(
+                                    tenant.name, app_profile.name, epg.name)
+                                }
+                            self.lock.acquire()
+                            self.annotations[item] = data
+                            self.lock.release()
+                        except ValueError:
+                            continue
                 else:
                     continue
             if self.stopped():
@@ -281,7 +321,7 @@ def main():
                     'conf':'vrf'
                     }
                 }
-    
+
     parser = argparse.ArgumentParser(description='Tetration-ACI Annotator: Required inputs are below.  Any inputs not collected via command line arguments or environment variables will be collected via interactive prompt.')
     for item in conf_vars:
         descr = conf_vars[item]['descr']
